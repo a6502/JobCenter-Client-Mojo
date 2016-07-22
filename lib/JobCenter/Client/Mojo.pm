@@ -76,7 +76,8 @@ sub new {
 		});
 		$ns->on(close => sub {
 			$conn->close;
-			say 'aaarghel?';
+			$log->info('connection to API closed');
+			Mojo::IOLoop->stop;
 			#exit(1);
 		});
 	});
