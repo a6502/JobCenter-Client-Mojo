@@ -1,0 +1,52 @@
+#!/usr/bin/perl -CSDAL
+
+use Mojo::Base -base;
+use Mojo::JSON qw(decode_json encode_json);
+
+# standard modules
+use Data::Dumper;
+use Time::HiRes qw(time);
+
+# cpan
+use JobCenter::Client::Mojo;
+
+exit main(@ARGV);
+
+sub main {
+	if (scalar @_ != 2) {
+		die "usage: $0 <wfname> <jsonblob>";
+	}
+
+	my ($wfname, $inargs) = @_;
+
+	my $start = time();
+
+	# hopefully this checks for valid json..
+	my $inargsp = decode_json($inargs);
+
+	my $client = JobCenter::Client::Mojo->new(
+		who => 'theCustomer',
+		token => 'baz',
+		debug => 1,
+		json => 1,
+	);
+
+	die 'no client?' unless $client;
+
+	my ($job_id, $outargs) = $client->call(
+		wfname => $wfname,
+		inargs => $inargs,
+	);
+
+	my $took = time() - $start;
+	
+	if ($job_id) {
+		say "job_id: $job_id, outargs: $outargs";
+	} else {
+		say "job not created?";
+	}
+	printf("took %0.3f\n", $took);
+}
+
+1;
+

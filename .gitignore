@@ -1,0 +1,4 @@
+/JobCenter-Client-Mojo-*.tar.gz
+/JobCenter-Client-Mojo-*/
+/.build/
+*~
