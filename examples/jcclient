@@ -13,11 +13,11 @@ use JobCenter::Client::Mojo;
 exit main(@ARGV);
 
 sub main {
-	if (scalar @_ != 2) {
-		die "usage: $0 <wfname> <jsonblob>";
+	if (scalar @_ < 2 or scalar @_ > 3) {
+		die "usage: $0 <wfname> <jsonblob> [<versiontag>]";
 	}
 
-	my ($wfname, $inargs) = @_;
+	my ($wfname, $inargs, $vtag) = @_;
 
 	my $start = time();
 
@@ -36,6 +36,7 @@ sub main {
 	my ($job_id, $outargs) = $client->call(
 		wfname => $wfname,
 		inargs => $inargs,
+		vtag => $vtag,
 	);
 
 	my $took = time() - $start;
