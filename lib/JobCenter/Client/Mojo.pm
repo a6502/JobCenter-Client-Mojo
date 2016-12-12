@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.01'; # VERSION
+our $VERSION = '0.12'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -164,12 +164,15 @@ sub rpc_job_done {
 sub call {
 	my ($self, %args) = @_;
 	my ($done, $job_id, $outargs);
-	$args{cb} = sub {
+	$args{cb1} = sub {
+		($job_id) = @_;
+		$done++ unless $job_id;
+	};
+	$args{cb2} = sub {
 		($job_id, $outargs) = @_;
 		$done++;
 	};
-	$job_id = $self->call_nb(%args);
-	return unless $job_id;
+	$self->call_nb(%args);
 
 	Mojo::IOLoop->one_tick while !$done;
 
@@ -181,7 +184,8 @@ sub call_nb {
 	my $wfname = $args{wfname} or die 'no workflowname?';
 	my $vtag = $args{vtag};
 	my $inargs = $args{inargs} // '{}';
-	my $callcb = $args{cb} // die 'no callback?';
+	my $callcb = $args{cb1} // die 'no call callback?';
+	my $rescb = $args{cb2} // die 'no result callback?';
 	my $inargsj;
 
 	if ($self->{json}) {
@@ -195,7 +199,6 @@ sub call_nb {
 	}
 
 	$self->log->debug("calling $wfname with '$inargsj'" . (($vtag) ? " (vtag $vtag)" : ''));
-	my $job_id;
 
 	my $delay = Mojo::IOLoop->delay->steps(
 		sub {
@@ -203,22 +206,23 @@ sub call_nb {
 			$self->conn->call('create_job', { wfname => $wfname, vtag => $vtag, inargs => $inargs }, $d->begin(0));
 		},
 		sub {
-		 	my ($d, $e, $r) = @_;
+		 	my ($d, $e, $job_id) = @_;
 		 	if ($e) {
 			 	$self->log->error("create_job returned error: $e->{message} ($e->{code})");
+			 	$callcb->();
 			 	return;
 			}
-			$job_id = $r or return;
-			$self->log->debug("create_job returned job_id: $job_id");
-			$self->jobs->{$job_id} = $callcb;
+			if ($job_id) {
+				$self->log->debug("create_job returned job_id: $job_id");
+				$self->jobs->{$job_id} = $rescb;
+			}
+			$callcb->($job_id);
 		}
 	)->catch(sub {
 		my ($delay, $err) = @_;
 		$self->log->error("Something went wrong in call_nb: $err");
+		$callcb->();
 	});
-	$delay->wait;
-
-	return $job_id;
 }
 
 sub work {
@@ -493,8 +497,17 @@ Starts the L<Mojo::IOLoop>.
 
 =head1 SEE ALSO
 
-L<Jobcenter>, L<jcclient>, L<jcworker>,
-L<Mojo::IOLoop>.
+=item *
+
+L<Mojo::IOLoop>, L<Mojo::IOLoop::Stream>, L<http://mojolicious.org>: the L<Mojolicious> Web framework
+
+=item *
+
+L<examples/jcclient>, L<examples/jcworker>
+
+=item *
+
+L<https://github.com/a6502/JobCenter>: JobCenter Orchestration Engine
 
 =cut
 
