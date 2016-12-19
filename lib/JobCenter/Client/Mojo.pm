@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.12'; # VERSION
+our $VERSION = '0.13'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -85,6 +85,7 @@ sub new {
 	$self->{actions} = {};
 	$self->{address} = $address;
 	$self->{clientid} = $clientid;
+	$self->{daemon} = $args{daemon} // 0;
 	$self->{debug} = $args{debug} // 1;
 	$self->{jobs} = {};
 	$self->{json} = $json;
@@ -118,11 +119,13 @@ sub rpc_greetings {
 	Mojo::IOLoop->delay->steps(
 		sub {
 			my $d = shift;
+			die "wrong api version $i->{version} (expected 1.1)" unless $i->{version} eq '1.1';
 			$self->log->info('got greeting from ' . $i->{who});
 			$c->call('hello', {who => $self->who, method => 'password', token => $self->token}, $d->begin(0));
 		},
 		sub {
-			my ($d, $e, $r, $w) = @_;
+			my ($d, $e, $r) = @_;
+			my $w;
 			#say 'hello returned: ', Dumper(\@_);
 			die "hello returned error $e->{message} ($e->{code})" if $e;
 			die 'no results from hello?' unless $r;
@@ -131,7 +134,7 @@ sub rpc_greetings {
 				$self->log->info("hello returned: $r, $w");
 				$self->{auth} = 1;
 			} else {
-				$self->log->error('hello failed' . ($w // ''));
+				$self->log->error('hello failed: ' . ($w // ''));
 				$self->{auth} = 0; # defined but false
 			}
 		}
@@ -206,17 +209,23 @@ sub call_nb {
 			$self->conn->call('create_job', { wfname => $wfname, vtag => $vtag, inargs => $inargs }, $d->begin(0));
 		},
 		sub {
-		 	my ($d, $e, $job_id) = @_;
+			my ($d, $e, $r) = @_;
 		 	if ($e) {
 			 	$self->log->error("create_job returned error: $e->{message} ($e->{code})");
 			 	$callcb->();
 			 	return;
 			}
+			my ($job_id, $msg) = @$r; # fixme: check for arrayref?
+			if ($msg) {
+				$self->log->error("create_job returned error: $msg");
+				$callcb->();
+				return;
+			}
 			if ($job_id) {
 				$self->log->debug("create_job returned job_id: $job_id");
 				$self->jobs->{$job_id} = $rescb;
+				$callcb->($job_id);
 			}
-			$callcb->($job_id);
 		}
 	)->catch(sub {
 		my ($delay, $err) = @_;
@@ -225,10 +234,45 @@ sub call_nb {
 	});
 }
 
+sub get_job_status {
+	my ($self, $job_id) = @_;
+	croak('no job_id?') unless $job_id;
+
+	my ($done, $job_id2, $outargs);
+	Mojo::IOLoop->delay->steps(
+	sub {
+		my $d = shift;
+		# fixme: check results?
+		$self->conn->call('get_job_status', { job_id => $job_id }, $d->begin(0));
+	},
+	sub {
+		#say 'call returned: ', Dumper(\@_);
+		my ($d, $e, $r) = @_;
+		if ($e) {
+			$self->log->debug("get_job_status got error $e");
+			$outargs = $e;
+			$done++;
+			return;
+		}
+		($job_id2, $outargs) = @$r;
+		#$self->log->debug("get_job_satus got job_id: $res msg: $msg");
+		$done++;
+	})->catch(sub {
+		my ($d, $err) = @_;
+		$self->log->debug("something went wrong with get_job_status: $err");
+		$done++;
+	});
+
+	Mojo::IOLoop->one_tick while !$done;
+
+	return $job_id, $outargs;
+}
+
+
 sub work {
 	my ($self) = @_;
 	if ($self->daemon) {
-		daemonize();
+		_daemonize();
 	}
 
 	$self->log->debug('JobCenter::Client::Mojo starting work');
@@ -328,6 +372,21 @@ sub rpc_task_ready {
 	});
 }
 
+# copied from Mojo::Server
+sub _daemonize {
+	use POSIX;
+
+	# Fork and kill parent
+	die "Can't fork: $!" unless defined(my $pid = fork);
+	exit 0 if $pid;
+	POSIX::setsid or die "Can't start a new session: $!";
+
+	# Close filehandles
+	open STDIN,  '</dev/null';
+	open STDOUT, '>/dev/null';
+	open STDERR, '>&STDOUT';
+}
+
 1;
 
 =encoding utf8
@@ -416,7 +475,7 @@ expected and json encoded.  (default true)
 
 =head2 call
 
-($job_id, result) = $client->call(%args);
+($job_id, $result) = $client->call(%args);
 
 Creates a new L<JobCenter> job and waits for the results.  Throws an error
 if somethings goes wrong immediately.  Errors encountered during later
@@ -452,6 +511,16 @@ Valid arguments are those for L<call> and:
 ( cb => sub { ($job_id, $outargs) = @_; ... } )
 
 =back
+
+=head get_job_status
+
+($job_id, $result) = $client->get_job_status($job_id);
+
+Retrieves the status for the given $job_id.  If the job_id does not exist
+then the returned $job_id will be undefined and $result will be an error
+message.  If the job has not finished executing then both $job_id and
+$result will be undefined.  Otherwise the $result will contain the result of
+the job.  (Which may be a JobCenter error object)
 
 =head2 announce
 
