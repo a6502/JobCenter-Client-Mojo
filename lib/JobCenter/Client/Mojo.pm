@@ -30,8 +30,8 @@ use JSON::MaybeXS qw(decode_json encode_json);
 use MojoX::NetstringStream;
 
 has [qw(
-	actions address auth conn daemon debug jobs json log port rpc
-	timeout tls token who
+	actions address auth conn daemon debug jobs json log method 
+	port rpc timeout tls token who
 )];
 
 sub new {
@@ -46,6 +46,9 @@ sub new {
 	my $port = $args{port} // 6522;
 	my $timeout = $args{timeout} // 60;
 	my $tls = $args{tls} // 0;
+	my $tls_ca = $args{tls_ca};
+	my $tls_cert = $args{tls_cert};
+	my $tls_key = $args{tls_key};
 	my $token = $args{token} or croak 'no token?';
 	my $who = $args{who} or croak 'no who?';
 
@@ -55,12 +58,24 @@ sub new {
 	$rpc->register('ping', sub { $self->rpc_ping(@_) });
 	$rpc->register('task_ready', sub { $self->rpc_task_ready(@_) }, notification => 1);
 
-	my $clientid = Mojo::IOLoop->client({
+	my $clarg = {
 		address => $address,
 		port => $port,
 		tls => $tls,
-	} => sub {
+	};
+	$clarg->{tls_ca} = $tls_ca if $tls_ca;
+	$clarg->{tls_cert} = $tls_cert if $tls_cert;
+	$clarg->{tls_key} = $tls_key if $tls_key;
+
+	my $clientid = Mojo::IOLoop->client(
+		$clarg => sub {
 		my ($loop, $err, $stream) = @_;
+		if ($err) {
+			$err =~ s/\n$//s;
+			$log->info('connection to API failed: ' . $err);
+			$self->{auth} = 0;
+			return;
+		}
 		my $ns = MojoX::NetstringStream->new(stream => $stream);
 		my $conn = $rpc->newconnection(
 			owner => $self,
@@ -90,10 +105,14 @@ sub new {
 	$self->{jobs} = {};
 	$self->{json} = $json;
 	$self->{log} = $log;
+	$self->{method} = $method;
 	$self->{port} = $port;
 	$self->{rpc} = $rpc;
 	$self->{timeout} = $timeout;
 	$self->{tls} = $tls;
+	$self->{tls_ca} = $tls_ca;
+	$self->{tls_cert} = $tls_cert;
+	$self->{tls_key} = $tls_key;
 	$self->{token} = $token;
 	$self->{who} = $who;
 
@@ -121,7 +140,7 @@ sub rpc_greetings {
 			my $d = shift;
 			die "wrong api version $i->{version} (expected 1.1)" unless $i->{version} eq '1.1';
 			$self->log->info('got greeting from ' . $i->{who});
-			$c->call('hello', {who => $self->who, method => 'password', token => $self->token}, $d->begin(0));
+			$c->call('hello', {who => $self->who, method => $self->method, token => $self->token}, $d->begin(0));
 		},
 		sub {
 			my ($d, $e, $r) = @_;
@@ -577,6 +596,28 @@ L<examples/jcclient>, L<examples/jcworker>
 =item *
 
 L<https://github.com/a6502/JobCenter>: JobCenter Orchestration Engine
+
+=head1 ACKNOWLEDGEMENT
+
+This software has been developed with support from L<STRATO|https://www.strato.com/>.
+In German: Diese Software wurde mit Unterstützung von L<STRATO|https://www.strato.de/> entwickelt.
+
+=head1 AUTHORS
+
+=over 4
+
+=item *
+
+Wieger Opmeer <wiegerop@cpan.org>
+
+=back
+
+=head1 COPYRIGHT AND LICENSE
+
+This software is copyright (c) 2017 by Wieger Opmeer.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
 
 =cut
 
