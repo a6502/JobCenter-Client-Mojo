@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.14'; # VERSION
+our $VERSION = '0.15'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -18,7 +18,7 @@ use Mojo::Log;
 # standard perl
 use Carp qw(croak);
 use Cwd qw(realpath);
-use Data::Dumper;
+use Encode qw(encode_utf8 decode_utf8);
 use File::Basename;
 use FindBin;
 
@@ -170,6 +170,7 @@ sub rpc_job_done {
 	my $outargs = $i->{outargs};
 	my $outargsj = encode_json($outargs);
 	$outargs = $outargsj if $self->{json};
+	$outargsj = decode_utf8($outargsj); # for debug printing
 	my $callcb = delete $self->{jobs}->{$job_id};
 	if ($callcb) {
 		$self->log->debug("got job_done: for job_id  $job_id result: $outargsj");
@@ -220,7 +221,8 @@ sub call_nb {
 		$inargsj = encode_json($inargs);
 	}
 
-	$self->log->debug("calling $wfname with '$inargsj'" . (($vtag) ? " (vtag $vtag)" : ''));
+	$inargsj = decode_utf8($inargsj);
+	$self->log->debug("calling $wfname with '" . $inargsj . "'" . (($vtag) ? " (vtag $vtag)" : ''));
 
 	my $delay = Mojo::IOLoop->delay->steps(
 		sub {
