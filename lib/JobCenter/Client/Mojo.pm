@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.15'; # VERSION
+our $VERSION = '0.16'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -21,6 +21,7 @@ use Cwd qw(realpath);
 use Encode qw(encode_utf8 decode_utf8);
 use File::Basename;
 use FindBin;
+use Sys::Hostname;
 
 # from cpan
 use JSON::RPC2::TwoWay;
@@ -209,6 +210,7 @@ sub call_nb {
 	my $inargs = $args{inargs} // '{}';
 	my $callcb = $args{cb1} // die 'no call callback?';
 	my $rescb = $args{cb2} // die 'no result callback?';
+	my $timeout = $args{timeout} // $self->timeout * 5; # a bit hackish..
 	my $inargsj;
 
 	if ($self->{json}) {
@@ -227,7 +229,12 @@ sub call_nb {
 	my $delay = Mojo::IOLoop->delay->steps(
 		sub {
 			my $d = shift;
-			$self->conn->call('create_job', { wfname => $wfname, vtag => $vtag, inargs => $inargs }, $d->begin(0));
+			$self->conn->call('create_job', {
+				wfname => $wfname,
+				vtag => $vtag,
+				inargs => $inargs,
+				timeout => $timeout,
+			}, $d->begin(0));
 		},
 		sub {
 			my ($d, $e, $r) = @_;
@@ -309,6 +316,8 @@ sub announce {
 	my $cb = $args{cb} or croak 'no cb?';
 	my $async = $args{async} // 0;
 	my $slots = $args{slots} // 1;
+	my $host = hostname;
+	my $workername = $args{workername} // "$self->{who} $host $0 $$";
 	
 	croak "already have action $actionname" if $self->actions->{$actionname};
 	
@@ -317,7 +326,11 @@ sub announce {
 	sub {
 		my $d = shift;
 		# fixme: check results?
-		$self->conn->call('announce', { actionname => $actionname, slots => $slots }, $d->begin(0));
+		$self->conn->call('announce', {
+				 workername => $workername,
+				 actionname => $actionname,
+				 slots => $slots
+			}, $d->begin(0));
 	},
 	sub {
 		#say 'call returned: ', Dumper(\@_);
@@ -366,15 +379,16 @@ sub rpc_task_ready {
 		my ($d, $e, $r) = @_;
 		#say 'get_task returned: ', Dumper(\@_);
 		if ($e) {
-			$self->log->debug("got $e->{message} ($e->{code}) calling get_task");
+			$$self->log->debug("got $e->{message} ($e->{code}) calling get_task");
 		}
 		unless ($r) {
-			self->log->debug('no task for get_task');
+			$self->log->debug('no task for get_task');
 			return;
 		}
-		my ($cookie, $inargs) = @$r;
+		my ($cookie, $inargs);
+		($job_id, $cookie, $inargs) = @$r;
 		unless ($cookie) {
-			self->log->debug('aaah? no cookie? (get_task)');
+			$self->log->debug('aaah? no cookie? (get_task)');
 			return;
 		}
 		local $@;
@@ -512,6 +526,9 @@ Valid arguments are:
 
 =item - vtag: version tag of the workflow to use (optional)
 
+=item - timeout: wait this many seconds for the job to finish
+(optional, defaults to 5 minutes)
+
 =back
 
 =head2 call_nb
@@ -533,7 +550,7 @@ Valid arguments are those for L<call> and:
 
 =back
 
-=head get_job_status
+=head2 get_job_status
 
 ($job_id, $result) = $client->get_job_status($job_id);
 
@@ -550,7 +567,9 @@ will be called when there is a task to be performed.  Returns an error when
 there was a problem announcing the action.
 
   my $err = $client->announce(
-    actionname => '...',
+    workername => 'me',
+    actionname => 'do',
+    slots => 1    
     cb => sub { ... },
   );
   die "could not announce $actionname?: $err" if $err;
@@ -560,6 +579,10 @@ See L<jcworker> for an example.
 Valid arguments are:
 
 =over 4
+
+=item - workername: name of the worker
+
+(optional, defaults to client->who, processname and processid)
 
 =item - actionname: name of the action
 
@@ -572,12 +595,12 @@ Valid arguments are:
 =item - async: if true then the callback gets passed another callback as the
 last argument that is to be called on completion of the task.
 
-(default false)
+(optional, default false)
 
 =item - slots: the amount of tasks the worker is able to process in parallel
 for this action.
 
-(default 1)
+(optional, default 1)
 
 =back
 
@@ -586,6 +609,8 @@ for this action.
 Starts the L<Mojo::IOLoop>.
 
 =head1 SEE ALSO
+
+=over 4
 
 =item *
 
@@ -596,6 +621,8 @@ L<Mojo::IOLoop>, L<Mojo::IOLoop::Stream>, L<http://mojolicious.org>: the L<Mojol
 L<examples/jcclient>, L<examples/jcworker>
 
 =item *
+
+=back
 
 L<https://github.com/a6502/JobCenter>: JobCenter Orchestration Engine
 
