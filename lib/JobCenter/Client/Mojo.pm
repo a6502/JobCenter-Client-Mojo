@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.16'; # VERSION
+our $VERSION = '0.17'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -28,7 +28,7 @@ use JSON::RPC2::TwoWay;
 # JSON::RPC2::TwoWay depends on JSON::MaybeXS anyways, so it can be used here
 # without adding another dependency
 use JSON::MaybeXS qw(decode_json encode_json);
-use MojoX::NetstringStream;
+use MojoX::NetstringStream 0.04;
 
 has [qw(
 	actions address auth conn daemon debug jobs json log method 
@@ -181,7 +181,7 @@ sub rpc_job_done {
 		};
 		$self->log->info("got $@ calling callback");
 	} else {
-		$self->log->debug("got job_done for unknown job $job_id result:  $outargsj");
+		$self->log->debug("got job_done for unknown job $job_id result:	 $outargsj");
 	}
 }
 
@@ -238,15 +238,15 @@ sub call_nb {
 		},
 		sub {
 			my ($d, $e, $r) = @_;
-		 	if ($e) {
-			 	$self->log->error("create_job returned error: $e->{message} ($e->{code})");
-			 	$callcb->();
-			 	return;
+			if ($e) {
+				$self->log->error("create_job returned error: $e->{message} ($e->{code}");
+				$callcb->(undef, "$e->{message} ($e->{code}");
+				return;
 			}
 			my ($job_id, $msg) = @$r; # fixme: check for arrayref?
 			if ($msg) {
 				$self->log->error("create_job returned error: $msg");
-				$callcb->();
+				$callcb->(undef, $msg);
 				return;
 			}
 			if ($job_id) {
@@ -258,7 +258,7 @@ sub call_nb {
 	)->catch(sub {
 		my ($delay, $err) = @_;
 		$self->log->error("Something went wrong in call_nb: $err");
-		$callcb->();
+		$callcb->(undef, $err);
 	});
 }
 
@@ -296,6 +296,29 @@ sub get_job_status {
 	return $job_id, $outargs;
 }
 
+sub ping {
+	my ($self, $timeout) = @_;
+
+	$timeout //= $self->timeout;
+	my ($done, $ret);
+
+	Mojo::IOLoop->timer($timeout => sub {
+		$done++;
+	});
+
+	$self->conn->call('ping', {}, sub {
+		my ($e, $r) = @_;
+		if (not $e and $r and $r =~ /pong/) {
+			$ret = 1;
+		} else {
+			%$self = ();
+		}
+		$done++;
+	});
+
+	Mojo::IOLoop->one_tick while !$done;
+	return $ret;
+}
 
 sub work {
 	my ($self) = @_;
@@ -354,8 +377,6 @@ sub announce {
 
 sub rpc_ping {
 	my ($self, $c, $i, $rpccb) = @_;
-	#my $tmr = Mojo::IOLoop->timer(3 => sub { $rpccb->('pong!'); } );
-	#return;
 	return 'pong!';
 }
 
@@ -477,6 +498,18 @@ Valid arguments are:
 
 (default false)
 
+=item - tls_ca: verify server using ca
+
+(default undef)
+
+=item - tls_key: private client key
+
+(default undef)
+
+=item - tls_ca: public client certificate
+
+(default undef)
+
 =item - who: who to authenticate as.
 
 (required)
@@ -544,9 +577,16 @@ Valid arguments are those for L<call> and:
 
 =over 4
 
-=item - cb: coderef to the callback to call on completion (requird)
+=item - cb1: coderef to the callback to call on job creation (requird)
 
-( cb => sub { ($job_id, $outargs) = @_; ... } )
+( cb1 => sub { ($job_id, $err) = @_; ... } )
+
+If job_id is undefined the job was not created, the error is then returned
+as the second return value.
+
+=item - cb2: coderef to the callback to call on job completion (requird)
+
+( cb2 => sub { ($job_id, $outargs) = @_; ... } )
 
 =back
 
@@ -560,6 +600,13 @@ message.  If the job has not finished executing then both $job_id and
 $result will be undefined.  Otherwise the $result will contain the result of
 the job.  (Which may be a JobCenter error object)
 
+=head2 ping
+
+$status = $client->ping($timeout);
+
+Tries to ping the JobCenter API. On success return true. On failure returns
+the undefined value, after that the client object should be undefined.
+
 =head2 announce
 
 Announces the capability to do an action to the Api.  The provided callback
@@ -569,7 +616,7 @@ there was a problem announcing the action.
   my $err = $client->announce(
     workername => 'me',
     actionname => 'do',
-    slots => 1    
+    slots => 1
     cb => sub { ... },
   );
   die "could not announce $actionname?: $err" if $err;
