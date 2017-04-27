@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.18'; # VERSION
+our $VERSION = '0.19'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -126,7 +126,7 @@ sub new {
 	});
 
 	$self->log->debug('starting handshake');
-	Mojo::IOLoop->one_tick while !defined $self->{auth};
+	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
 	$self->log->debug('done with handhake?');
 
 	Mojo::IOLoop->remove($tmr);
@@ -172,16 +172,16 @@ sub rpc_job_done {
 	my $outargsj = encode_json($outargs);
 	$outargs = $outargsj if $self->{json};
 	$outargsj = decode_utf8($outargsj); # for debug printing
-	my $callcb = delete $self->{jobs}->{$job_id};
-	if ($callcb) {
+	my $rescb = delete $self->{jobs}->{$job_id};
+	if ($rescb) {
 		$self->log->debug("got job_done: for job_id  $job_id result: $outargsj");
 		local $@;
 		eval {
-			$callcb->($job_id, $outargs);
+			$rescb->($job_id, $outargs);
 		};
-		$self->log->info("got $@ calling callback");
+		$self->log->info("got $@ calling result callback") if $@;
 	} else {
-		$self->log->debug("got job_done for unknown job $job_id result:	 $outargsj");
+		$self->log->debug("got job_done for unknown job $job_id result: $outargsj");
 	}
 }
 
@@ -198,7 +198,7 @@ sub call {
 	};
 	$self->call_nb(%args);
 
-	Mojo::IOLoop->one_tick while !$done;
+	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
 
 	return $job_id, $outargs;
 }
@@ -291,7 +291,7 @@ sub get_job_status {
 		$done++;
 	});
 
-	Mojo::IOLoop->one_tick while !$done;
+	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
 
 	return $job_id, $outargs;
 }
@@ -316,7 +316,10 @@ sub ping {
 		$done++;
 	});
 
-	Mojo::IOLoop->one_tick while !$done;
+	# we could recurse here
+        #Mojo::IOLoop->one_tick while !$done;
+	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
+
 	return $ret;
 }
 
