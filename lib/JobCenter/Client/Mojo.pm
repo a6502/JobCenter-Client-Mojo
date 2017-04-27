@@ -126,7 +126,7 @@ sub new {
 	});
 
 	$self->log->debug('starting handshake');
-	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
+	Mojo::IOLoop->singleton->reactor->one_tick while !defined $self->{auth};
 	$self->log->debug('done with handhake?');
 
 	Mojo::IOLoop->remove($tmr);
