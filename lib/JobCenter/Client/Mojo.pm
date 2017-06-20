@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.20'; # VERSION
+our $VERSION = '0.21'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -22,7 +22,6 @@ use Cwd qw(realpath);
 use Data::Dumper;
 use Encode qw(encode_utf8 decode_utf8);
 use File::Basename;
-use FindBin;
 use IO::Handle;
 use POSIX ();
 use Storable;
