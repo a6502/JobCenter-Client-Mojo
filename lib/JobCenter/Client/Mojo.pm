@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.21'; # VERSION
+our $VERSION = '0.22'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -28,15 +28,15 @@ use Storable;
 use Sys::Hostname;
 
 # from cpan
-use JSON::RPC2::TwoWay;
+use JSON::RPC2::TwoWay 0.02;
 # JSON::RPC2::TwoWay depends on JSON::MaybeXS anyways, so it can be used here
 # without adding another dependency
 use JSON::MaybeXS qw(decode_json encode_json);
 use MojoX::NetstringStream 0.04; # older versions have utf-8 bugs
 
 has [qw(
-	actions address auth conn daemon debug jobs json log method 
-	port rpc timeout tls token who
+	actions address auth clientid conn daemon debug jobs json lastping log
+	method ping_timeout port rpc timeout tls token who
 )];
 
 sub new {
@@ -109,6 +109,7 @@ sub new {
 	$self->{debug} = $args{debug} // 1;
 	$self->{jobs} = {};
 	$self->{json} = $json;
+	$self->{ping_timeout} = $args{ping_timeout} // 300;
 	$self->{log} = $log;
 	$self->{method} = $method;
 	$self->{port} = $port;
@@ -333,6 +334,15 @@ sub work {
 		_daemonize();
 	}
 
+	my $pt = $self->ping_timeout;
+	my $tmr = Mojo::IOLoop->timer($pt => sub {
+		my $ioloop = shift;
+		return if ($self->lastping // 0) > time - $pt;
+		$self->log->error('ping timeout');
+		$ioloop->remove($self->clientid);
+		$ioloop->stop;
+	}) if $pt > 0;
+
 	$self->log->debug('JobCenter::Client::Mojo starting work');
 	Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
 	$self->log->debug('JobCenter::Client::Mojo done?');
@@ -391,6 +401,7 @@ sub announce {
 
 sub rpc_ping {
 	my ($self, $c, $i, $rpccb) = @_;
+	$self->lastping(time());
 	return 'pong!';
 }
 
@@ -630,9 +641,14 @@ expected and json encoded.  (default true)
 
 (per default a new L<Mojo::Log> object is created)
 
-=item - timeout: how long to wait for operations to complete
+=item - timeout: how long to wait for Api calls to complete
 
 (default 60 seconds)
+
+=item - ping_timeout: after this long without a ping from the Api the
+connection will be closed and the work() method will return
+
+(default 5 minutes)
 
 =back
 
@@ -655,7 +671,7 @@ Valid arguments are:
 =item - vtag: version tag of the workflow to use (optional)
 
 =item - timeout: wait this many seconds for the job to finish
-(optional, defaults to 5 minutes)
+(optional, defaults to 5 times the Api-call timeout, so default 5 minutes)
 
 =back
 
