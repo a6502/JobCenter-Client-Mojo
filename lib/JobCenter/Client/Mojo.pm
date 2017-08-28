@@ -335,7 +335,7 @@ sub get_job_status {
 
 	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
 
-	my $outargs = encode_json($outargs) if $self->{json};
+	$outargs = encode_json($outargs) if $self->{json};
 	return $job_id2, $outargs;
 }
 
