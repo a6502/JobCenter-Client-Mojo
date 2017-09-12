@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.25'; # VERSION
+our $VERSION = '0.26'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -427,6 +427,7 @@ sub announce {
 			cb => $cb,
 			mode => $mode,
 			undocb => $undocb,
+			addenv => $args{addenv} // 0,
 			slots => $slots } if $res;
 		$err = $msg unless $res;
 	})->catch(sub {
@@ -470,27 +471,28 @@ sub rpc_task_ready {
 			$self->log->debug('no task for get_task');
 			return;
 		}
-		my ($cookie, $inargs);
-		($job_id, $cookie, $inargs) = @$r;
+		my ($cookie, @args);
+		($job_id, $cookie, @args) = @$r;
 		unless ($cookie) {
 			$self->log->debug('aaah? no cookie? (get_task)');
 			return;
 		}
+		pop @args unless $action->{addenv}; # remove env
 		local $@;
 		if ($action->{mode} eq 'subproc') {
 			eval {
-				$self->_subproc($c, $action, $job_id, $cookie, $inargs);
+				$self->_subproc($c, $action, $job_id, $cookie, @args);
 			};
 			$c->notify('task_done', { cookie => $cookie, outargs => { error => $@ } }) if $@;
 		} elsif ($action->{mode} eq 'async') {
 			eval {
-				$action->{cb}->($job_id, $inargs, sub {
+				$action->{cb}->($job_id, @args, sub {
 					$c->notify('task_done', { cookie => $cookie, outargs => $_[0] });
 				});
 			};
 			$c->notify('task_done', { cookie => $cookie, outargs => { error => $@ } }) if $@;
 		} elsif ($action->{mode} eq 'sync') {
-			my $outargs = eval { $action->{cb}->($job_id, $inargs) };
+			my $outargs = eval { $action->{cb}->($job_id, @args) };
 			$outargs = { error => $@ } if $@;
 			$c->notify('task_done', { cookie => $cookie, outargs => $outargs });
 		} else { 
@@ -500,7 +502,7 @@ sub rpc_task_ready {
 }
 
 sub _subproc {
-	my ($self, $c, $action, $job_id, $cookie, $inargs) = @_;
+	my ($self, $c, $action, $job_id, $cookie, @args) = @_;
 
 	# based on Mojo::IOLoop::Subprocess
 	my $ioloop = Mojo::IOLoop->singleton;
@@ -514,7 +516,7 @@ sub _subproc {
 		$ioloop->reset;
 		close $reader; # or we won't get a sigpipe when daddy dies..
 		my $undo = 0;
-		my $outargs = eval { $action->{cb}->($job_id, $inargs) };
+		my $outargs = eval { $action->{cb}->($job_id, @args) };
 		if ($@) {
 			$outargs = {'error' => $@};
 			$undo++;
@@ -523,7 +525,7 @@ sub _subproc {
 		}
 		if ($undo and $action->{undocb}) {
 			$self->log->info("undoing for $job_id");;
-			my $res = eval { $action->{undocb}->($job_id, $inargs); };
+			my $res = eval { $action->{undocb}->($job_id, @args); };
 			$res = $@ if $@;
 			# how should this look?
 			$outargs = {'error' => {
@@ -541,7 +543,7 @@ sub _subproc {
 		close $writer or $undo++;
 		if ($undo and $action->{undocb}) {
 			$self->log->info("undoing for $job_id");;
-			eval { $action->{undocb}->($job_id, $inargs); };
+			eval { $action->{undocb}->($job_id, @args); };
 			# ignore errors because we can't report them back..
 		}
 		# FIXME: normal exit?
@@ -845,6 +847,12 @@ worker can only do mkdir on host example.com. Filter expressions are limited
 to simple equality tests on one or more keys, and only those keys that are
 allowed in the action definition. Filtering can be allowed, be mandatory or
 be forbidden per action.
+
+=item - addenv: pass on action enviroment to the callback
+
+If the addenv flag is true the action callback will be given one extra
+argument containing the action environment as a hashref.  In the async
+callback mode the environment will be inserted before the result callback.
 
 =back
 
