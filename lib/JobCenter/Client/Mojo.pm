@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.26'; # VERSION
+our $VERSION = '0.27'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -216,16 +216,24 @@ sub call_nb {
 	my $callcb = $args{cb1} // die 'no call callback?';
 	my $rescb = $args{cb2} // die 'no result callback?';
 	my $timeout = $args{timeout} // $self->timeout * 5; # a bit hackish..
+	my $reqauth = $args{reqauth};
 	my $inargsj;
 
 	if ($self->{json}) {
 		$inargsj = $inargs;
 		$inargs = decode_json($inargs);
 		croak 'inargs is not a json object' unless ref $inargs eq 'HASH';
+		if ($reqauth) {
+			$reqauth = decode_json($reqauth);
+			croak 'reqauth is not a json object' unless ref $reqauth eq 'HASH';
+		}
 	} else {
 		croak 'inargs should be a hashref' unless ref $inargs eq 'HASH';
 		# test encoding
 		$inargsj = encode_json($inargs);
+		if ($reqauth) {
+			croak 'reqauth should be a hashref' unless ref $reqauth eq 'HASH';
+		}
 	}
 
 	$inargsj = decode_utf8($inargsj);
@@ -239,6 +247,7 @@ sub call_nb {
 				vtag => $vtag,
 				inargs => $inargs,
 				timeout => $timeout,
+				($reqauth ? (reqauth => $reqauth) : ()),
 			}, $d->begin(0));
 		},
 		sub {
@@ -713,6 +722,9 @@ Valid arguments are:
 
 =item - timeout: wait this many seconds for the job to finish
 (optional, defaults to 5 times the Api-call timeout, so default 5 minutes)
+
+=item - reqauth: authentication token to be passed on to the authentication
+module of the API for per job/request authentication.
 
 =back
 
