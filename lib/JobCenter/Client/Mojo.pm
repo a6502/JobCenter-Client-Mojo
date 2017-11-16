@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.29'; # VERSION
+our $VERSION = '0.30'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -32,7 +32,7 @@ use JSON::RPC2::TwoWay 0.02;
 # JSON::RPC2::TwoWay depends on JSON::MaybeXS anyways, so it can be used here
 # without adding another dependency
 use JSON::MaybeXS qw(decode_json encode_json);
-use MojoX::NetstringStream 0.05; # for the enhanced close
+use MojoX::NetstringStream 0.06; # for the enhanced close
 
 has [qw(
 	actions address auth clientid conn daemon debug jobs json lastping log
