@@ -195,7 +195,7 @@ sub call {
 	my ($self, %args) = @_;
 	my ($done, $job_id, $outargs);
 	$args{cb1} = sub {
-		($job_id) = @_;
+		($job_id, $outargs) = @_;
 		$done++ unless $job_id;
 	};
 	$args{cb2} = sub {
@@ -205,6 +205,9 @@ sub call {
 	$self->call_nb(%args);
 
 	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
+        if ($outargs and not ref $outargs) { #came from cb1
+            $outargs = {error => $outargs};
+        }
 
 	return $job_id, $outargs;
 }
@@ -292,7 +295,7 @@ sub find_jobs {
 
 	#print 'filter: ', Dumper($filter);
 	$filter = encode_json($filter) if ref $filter eq 'HASH';
-	
+
 	my ($done, $err, $jobs);
 	Mojo::IOLoop->delay->steps(
 	sub {
@@ -445,9 +448,9 @@ sub announce {
 	my $slots = $args{slots} // 1;
 	my $host = hostname;
 	my $workername = $args{workername} // "$self->{who} $host $0 $$";
-	
+
 	croak "already have action $actionname" if $self->actions->{$actionname};
-	
+
 	my $err;
 	Mojo::IOLoop->delay->steps(
 	sub {
@@ -541,7 +544,7 @@ sub rpc_task_ready {
 			my $outargs = eval { $action->{cb}->($job_id, @args) };
 			$outargs = { error => $@ } if $@;
 			$c->notify('task_done', { cookie => $cookie, outargs => $outargs });
-		} else { 
+		} else {
 			die "unkown mode $action->{mode}";
 		}
 	});
