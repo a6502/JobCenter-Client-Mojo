@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base -base;
 
-our $VERSION = '0.31'; # VERSION
+our $VERSION = '0.32'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -205,9 +205,6 @@ sub call {
 	$self->call_nb(%args);
 
 	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
-        if ($outargs and not ref $outargs) { #came from cb1
-            $outargs = {error => $outargs};
-        }
 
 	return $job_id, $outargs;
 }
@@ -256,26 +253,30 @@ sub call_nb {
 		},
 		sub {
 			my ($d, $e, $r) = @_;
+			my ($job_id, $msg);
 			if ($e) {
 				$self->log->error("create_job returned error: $e->{message} ($e->{code}");
-				$callcb->(undef, "$e->{message} ($e->{code}");
-				return;
+				$msg = "$e->{message} ($e->{code}"
+			} else {
+				($job_id, $msg) = @$r; # fixme: check for arrayref?
+				if ($msg) {
+					$self->log->error("create_job returned error: $msg");
+				} elsif ($job_id) {
+					$self->log->debug("create_job returned job_id: $job_id");
+					$self->jobs->{$job_id} = $rescb;
+				}
 			}
-			my ($job_id, $msg) = @$r; # fixme: check for arrayref?
 			if ($msg) {
-				$self->log->error("create_job returned error: $msg");
-				$callcb->(undef, $msg);
-				return;
+				$msg = {error => $msg} unless ref $msg;
+				$msg = encode_json($msg) if $self->{json};
 			}
-			if ($job_id) {
-				$self->log->debug("create_job returned job_id: $job_id");
-				$self->jobs->{$job_id} = $rescb;
-				$callcb->($job_id);
-			}
+			$callcb->($job_id, $msg);
 		}
 	)->catch(sub {
 		my ($delay, $err) = @_;
 		$self->log->error("Something went wrong in call_nb: $err");
+		$err = { error => $err };
+		$err = encode_json($err) if $self->{json};
 		$callcb->(undef, $err);
 	});
 }
@@ -946,6 +947,10 @@ L<https://github.com/a6502/JobCenter>: JobCenter Orchestration Engine
 
 This software has been developed with support from L<STRATO|https://www.strato.com/>.
 In German: Diese Software wurde mit Unterstützung von L<STRATO|https://www.strato.de/> entwickelt.
+
+=head1 THANKS
+
+Thanks to Eitan Schuler for reporting a bug and providing a pull request.
 
 =head1 AUTHORS
 
