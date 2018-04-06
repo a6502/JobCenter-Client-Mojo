@@ -926,7 +926,9 @@ callback mode the environment will be inserted before the result callback.
 
 =head2 work
 
-Starts the L<Mojo::IOLoop>.
+Starts the L<Mojo::IOLoop>.  Returns a non-zero value when the IOLoop was
+stopped due to some error condition (like a lost connection or a ping
+timeout).
 
 =head1 SEE ALSO
 
