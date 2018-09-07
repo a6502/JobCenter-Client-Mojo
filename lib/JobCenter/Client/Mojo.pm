@@ -39,6 +39,13 @@ has [qw(
 	log method ns ping_timeout port rpc timeout tls token who
 )];
 
+# keep in sync with the jobcenter
+use constant {
+	WORK_OK                => 0,  # exit codes for work method
+	WORK_PING_TIMEOUT      => 92,
+	WORK_CONNECTION_CLOSED => 91,
+};
+
 sub new {
 	my ($class, %args) = @_;
 	my $self = $class->SUPER::new();
@@ -57,27 +64,60 @@ sub new {
 	my $token = $args{token} or croak 'no token?';
 	my $who = $args{who} or croak 'no who?';
 
-	my $rpc = JSON::RPC2::TwoWay->new(debug => $debug) or croak 'no rpc?';
+	$self->{address} = $address;
+	$self->{daemon} = $args{daemon} // 0;
+	$self->{debug} = $args{debug} // 1;
+	$self->{jobs} = {};
+	$self->{json} = $json;
+	$self->{ping_timeout} = $args{ping_timeout} // 300;
+	$self->{log} = $log;
+	$self->{method} = $method;
+	$self->{port} = $port;
+	$self->{timeout} = $timeout;
+	$self->{tls} = $tls;
+	$self->{tls_ca} = $tls_ca;
+	$self->{tls_cert} = $tls_cert;
+	$self->{tls_key} = $tls_key;
+	$self->{token} = $token;
+	$self->{who} = $who;
+	$self->{autoconnect} = ($args{autoconnect} //= 1);
+
+	return $self if !$args{autoconnect};
+
+	$self->connect;
+
+	return $self if $self->{auth};
+	return;
+}
+
+sub connect {
+	my $self = shift;
+
+	delete $self->{_exit};
+	delete $self->{auth};
+	$self->{actions} = {};
+
+	my $rpc = JSON::RPC2::TwoWay->new(debug => $self->{debug}) or croak 'no rpc?';
 	$rpc->register('greetings', sub { $self->rpc_greetings(@_) }, notification => 1);
 	$rpc->register('job_done', sub { $self->rpc_job_done(@_) }, notification => 1);
 	$rpc->register('ping', sub { $self->rpc_ping(@_) });
 	$rpc->register('task_ready', sub { $self->rpc_task_ready(@_) }, notification => 1);
 
 	my $clarg = {
-		address => $address,
-		port => $port,
-		tls => $tls,
+		address => $self->{address},
+		port => $self->{port},
+		tls => $self->{tls},
 	};
-	$clarg->{tls_ca} = $tls_ca if $tls_ca;
-	$clarg->{tls_cert} = $tls_cert if $tls_cert;
-	$clarg->{tls_key} = $tls_key if $tls_key;
+	$clarg->{tls_ca} = $self->{tls_ca} if $self->{tls_ca};
+	$clarg->{tls_cert} = $self->{tls_cert} if $self->{tls_cert};
+	$clarg->{tls_key} = $self->{tls_key} if $self->{tls_key};
 
 	my $clientid = Mojo::IOLoop->client(
 		$clarg => sub {
 		my ($loop, $err, $stream) = @_;
 		if ($err) {
 			$err =~ s/\n$//s;
-			$log->info('connection to API failed: ' . $err);
+			$self->log->info('connection to API failed: ' . $err);
 			$self->{auth} = 0;
 			return;
 		}
@@ -92,42 +132,25 @@ sub new {
 			my ($ns2, $chunk) = @_;
 			#say 'got chunk: ', $chunk;
 			my @err = $conn->handle($chunk);
-			$log->debug('chunk handler: ' . join(' ', grep defined, @err)) if @err;
+			$self->log->debug('chunk handler: ' . join(' ', grep defined, @err)) if @err;
 			$ns->close if $err[0];
 		});
 		$ns->on(close => sub {
 			$conn->close;
-			$log->info('connection to API closed');
-			$self->{_exit} = 91; # todo: doc
+			$self->log->info('connection to API closed');
+			$self->{_exit} = WORK_CONNECTION_CLOSED; # todo: doc
 			Mojo::IOLoop->stop;
 			#exit(1);
 		});
 	});
 
-	$self->{actions} = {};
-	$self->{address} = $address;
-	$self->{clientid} = $clientid;
-	$self->{daemon} = $args{daemon} // 0;
-	$self->{debug} = $args{debug} // 1;
-	$self->{jobs} = {};
-	$self->{json} = $json;
-	$self->{ping_timeout} = $args{ping_timeout} // 300;
-	$self->{log} = $log;
-	$self->{method} = $method;
-	$self->{port} = $port;
 	$self->{rpc} = $rpc;
-	$self->{timeout} = $timeout;
-	$self->{tls} = $tls;
-	$self->{tls_ca} = $tls_ca;
-	$self->{tls_cert} = $tls_cert;
-	$self->{tls_key} = $tls_key;
-	$self->{token} = $token;
-	$self->{who} = $who;
+	$self->{clientid} = $clientid;
 
 	# handle timeout?
-	my $tmr = Mojo::IOLoop->timer($timeout => sub {
+	my $tmr = Mojo::IOLoop->timer($self->{timeout} => sub {
 		my $loop = shift;
-		$log->error('timeout wating for greeting');
+		$self->log->error('timeout wating for greeting');
 		$loop->remove($clientid);
 		$self->{auth} = 0;
 	});
@@ -137,8 +160,12 @@ sub new {
 	$self->log->debug('done with handhake?');
 
 	Mojo::IOLoop->remove($tmr);
-	return $self if $self->{auth};
-	return;
+	1;
+}
+
+sub is_connected {
+	my $self = shift;
+	return $self->{auth} && !$self->{_exit};
 }
 
 sub rpc_greetings {
@@ -429,11 +456,11 @@ sub work {
 		return if ($self->lastping // 0) > time - $pt;
 		$self->log->error('ping timeout');
 		$ioloop->remove($self->clientid);
-		$self->{_exit} = 92; # todo: doc
+		$self->{_exit} = WORK_PING_TIMEOUT; # todo: doc
 		$ioloop->stop;
 	}) if $pt > 0;
 
-	$self->{_exit} = 0;
+	$self->{_exit} = WORK_OK;
 	$self->log->debug('JobCenter::Client::Mojo starting work');
 	Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
 	$self->log->debug('JobCenter::Client::Mojo done?');
