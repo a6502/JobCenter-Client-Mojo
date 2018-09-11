@@ -12,8 +12,6 @@ BEGIN {
 	$ENV{'MOJO_REACTOR'} = 'Mojo::Reactor::Poll' unless $ENV{'MOJO_REACTOR'};
 }
 
-use feature 'state';
-
 # more Mojolicious
 use Mojo::IOLoop;
 use Mojo::IOLoop::Stream;
@@ -462,6 +460,7 @@ sub work {
 		$self->log->error('ping timeout');
 		$ioloop->remove($self->clientid);
 		$self->{_exit} = WORK_PING_TIMEOUT; # todo: doc
+		$ioloop->remove($tmr);
 		$ioloop->stop;
 	}) if $pt > 0;
 
@@ -469,6 +468,7 @@ sub work {
 	$self->log->debug('JobCenter::Client::Mojo starting work');
 	Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
 	$self->log->debug('JobCenter::Client::Mojo done?');
+	Mojo::IOLoop->remove($tmr) if $tmr;
 
 	return $self->{_exit};
 }
