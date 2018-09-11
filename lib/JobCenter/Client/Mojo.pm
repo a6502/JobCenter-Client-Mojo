@@ -11,6 +11,9 @@ our $VERSION = '0.34'; # VERSION
 BEGIN {
 	$ENV{'MOJO_REACTOR'} = 'Mojo::Reactor::Poll' unless $ENV{'MOJO_REACTOR'};
 }
+
+use feature 'state';
+
 # more Mojolicious
 use Mojo::IOLoop;
 use Mojo::IOLoop::Stream;
@@ -156,7 +159,9 @@ sub connect {
 	});
 
 	$self->log->debug('starting handshake');
-	Mojo::IOLoop->singleton->reactor->one_tick while !defined $self->{auth};
+
+	$self->_loop(sub { not defined $self->{auth} });
+
 	$self->log->debug('done with handhake?');
 
 	Mojo::IOLoop->remove($tmr);
@@ -232,7 +237,7 @@ sub call {
 	};
 	$self->call_nb(%args);
 
-	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
+	$self->_loop(sub { !$done });
 
 	return $job_id, $outargs;
 }
@@ -349,7 +354,7 @@ sub find_jobs {
 		$done++;
 	});
 
-	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
+	$self->_loop(sub { !$done });
 
 	return $err, @$jobs if ref $jobs eq 'ARRAY';
 	return $err;
@@ -411,7 +416,7 @@ sub get_job_status {
 		$done++;
 	});
 
-	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
+	$self->_loop(sub { !$done });
 
 	$outargs = encode_json($outargs) if $self->{json} and ref $outargs;
 	return $job_id2, $outargs;
@@ -437,7 +442,7 @@ sub ping {
 		$done++;
 	});
 
-	Mojo::IOLoop->singleton->reactor->one_tick while !$done;
+	$self->_loop(sub { !$done });
 
 	return $ret;
 }
@@ -668,6 +673,36 @@ sub _daemonize {
 	open STDIN,  '</dev/null';
 	open STDOUT, '>/dev/null';
 	open STDERR, '>&STDOUT';
+}
+
+# tick while Mojo::Reactor is still running and condition callback is true
+sub _loop {
+	warn __PACKAGE__." recursing into IO loop" if state $looping++;
+
+	my $reactor = Mojo::IOLoop->singleton->reactor;
+	my $err;
+
+	if (ref $reactor eq 'Mojo::Reactor::EV') {
+
+		my $active = 1;
+
+		$active = $reactor->one_tick while $_[1]->() && $active;
+
+	} elsif (ref $reactor eq 'Mojo::Reactor::Poll') {
+
+		$reactor->{running}++;
+
+		$reactor->one_tick while $_[1]->() && $reactor->is_running;
+
+		$reactor->{running} &&= $reactor->{running} - 1;
+
+	} else {
+
+		$err = "unknown reactor: ".ref $reactor;
+	}
+
+	$looping--;
+	die $err if $err;
 }
 
 #sub DESTROY {
