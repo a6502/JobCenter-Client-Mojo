@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base 'Mojo::EventEmitter';
 
-our $VERSION = '0.34'; # VERSION
+our $VERSION = '0.35'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
