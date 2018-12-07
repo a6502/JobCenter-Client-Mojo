@@ -1,5 +1,5 @@
 package JobCenter::Client::Mojo;
-use Mojo::Base -base;
+use Mojo::Base 'Mojo::EventEmitter';
 
 our $VERSION = '0.34'; # VERSION
 
@@ -98,6 +98,13 @@ sub connect {
 	delete $self->{auth};
 	$self->{actions} = {};
 
+	$self->on(disconnect => sub {
+		my ($self, $code) = @_;
+		$self->{_exit} = $code;
+		Mojo::IOLoop->stop;
+		#exit(1);
+	});
+
 	my $rpc = JSON::RPC2::TwoWay->new(debug => $self->{debug}) or croak 'no rpc?';
 	$rpc->register('greetings', sub { $self->rpc_greetings(@_) }, notification => 1);
 	$rpc->register('job_done', sub { $self->rpc_job_done(@_) }, notification => 1);
@@ -139,9 +146,7 @@ sub connect {
 		$ns->on(close => sub {
 			$conn->close;
 			$self->log->info('connection to API closed');
-			$self->{_exit} = WORK_CONNECTION_CLOSED; # todo: doc
-			Mojo::IOLoop->stop;
-			#exit(1);
+			$self->emit(disconnect => WORK_CONNECTION_CLOSED); # todo doc
 		});
 	});
 
