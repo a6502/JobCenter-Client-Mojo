@@ -1008,9 +1008,7 @@ L<Mojo::IOLoop>, L<Mojo::IOLoop::Stream>, L<http://mojolicious.org>: the L<Mojol
 
 =item *
 
-L<examples/jcclient>, L<examples/jcworker>
-
-=item *
+L<jcclient|https://github.com/a6502/JobCenter-Client-Mojo/blob/master/examples/jcclient>, L<jcworker|https://github.com/a6502/JobCenter-Client-Mojo/blob/master/examples/jcworker>
 
 =back
 
