@@ -1,7 +1,7 @@
 package JobCenter::Client::Mojo;
 use Mojo::Base 'Mojo::EventEmitter';
 
-our $VERSION = '0.36'; # VERSION
+our $VERSION = '0.37'; # VERSION
 
 #
 # Mojo's default reactor uses EV, and EV does not play nice with signals
@@ -205,7 +205,7 @@ sub rpc_greetings {
 			}
 		}
 	)->catch(sub {
-		my ($delay, $err) = @_;
+		my ($err) = @_;
 		$self->log->error('something went wrong in handshake: ' . $err);
 		$self->{auth} = '';
 	});
@@ -313,7 +313,7 @@ sub call_nb {
 			$callcb->($job_id, $msg);
 		}
 	)->catch(sub {
-		my ($delay, $err) = @_;
+		my ($err) = @_;
 		$self->log->error("Something went wrong in call_nb: $err");
 		$err = { error => $err };
 		$err = encode_json($err) if $self->{json};
@@ -348,16 +348,16 @@ sub find_jobs {
 		#say 'find_jobs call returned: ', Dumper(\@_);
 		my ($d, $e, $r) = @_;
 		if ($e) {
-			$self->log->debug("find_jobs got error $e");
-			$err = $e;
+			$self->log->error("find_jobs got error $e->{message} ($e->{code})");
+			$err = $e->{message};
 			$done++;
 			return;
 		}
 		$jobs = $r;
 		$done++;
 	})->catch(sub {
-		my ($d, $err) = @_;
-		$self->log->debug("something went wrong with get_job_status: $err");
+		my ($err) = @_;
+		$self->log->error("something went wrong with get_job_status: $err");
 		$done++;
 	});
 
@@ -381,8 +381,8 @@ sub get_api_status {
 		#say 'call returned: ', Dumper(\@_);
 		my ($d, $e, $r) = @_;
 		if ($e) {
-			$self->log->debug("get_api_status got error $e");
-			$result = $e;
+			$self->log->error("get_api_status got error $e->{message} ($e->{code})");
+			$result = $e->{message};
 			return;
 		}
 		$result = $r;
@@ -409,8 +409,8 @@ sub get_job_status {
 		#say 'call returned: ', Dumper(\@_);
 		my ($d, $e, $r) = @_;
 		if ($e) {
-			$self->log->debug("get_job_status got error $e");
-			$outargs = $e;
+			$self->log->error("get_job_status got error $e->{message} ($e->{code})");
+			$outargs = $e->{message};
 			$done++;
 			return;
 		}
@@ -418,7 +418,7 @@ sub get_job_status {
 		#$self->log->debug("get_job_satus got job_id: $res msg: $msg");
 		$done++;
 	})->catch(sub {
-		my ($d, $err) = @_;
+		my ($err) = @_;
 		$self->log->debug("something went wrong with get_job_status: $err");
 		$done++;
 	});
@@ -491,6 +491,33 @@ sub stop {
 	$self->ioloop->stop;
 }
 
+sub create_slotgroup {
+	my ($self, $name, $slots) = @_;
+	croak('no slotgroup name?') unless $name;
+
+	my $result;
+	$self->ioloop->delay(
+	sub {
+		my $d = shift;
+		$self->conn->call('create_slotgroup', { name => $name, slots => $slots }, $d->begin(0));
+	},
+	sub {
+		#say 'call returned: ', Dumper(\@_);
+		my ($d, $e, $r) = @_;
+		if ($e) {
+			$self->log->error("create_slotgroup got error $e->{message}");
+			$result = $e->{message};
+			return;
+		}
+		$result = $r;
+	})->catch(sub {
+		my ($err) = @_;
+		$self->log->eror("something went wrong with create_slotgroup: $err");
+	})->wait();
+
+	return $result;
+}
+
 sub announce {
 	my ($self, %args) = @_;
 	my $actionname = $args{actionname} or croak 'no actionname?';
@@ -499,7 +526,6 @@ sub announce {
 	my $mode = $args{mode} // (($args{async}) ? 'async' : 'sync');
 	croak "unknown callback mode $mode" unless $mode =~ /^(subproc|async|sync)$/;
 	my $undocb = $args{undocb};
-	my $slots = $args{slots} // 1;
 	my $host = hostname;
 	my $workername = $args{workername} // "$self->{who} $host $0 $$";
 
@@ -513,7 +539,8 @@ sub announce {
 		$self->conn->call('announce', {
 				 workername => $workername,
 				 actionname => $actionname,
-				 slots => $slots,
+				 slotgroup => $args{slotgroup},
+				 slots => $args{slots},
 				 (($args{filter}) ? (filter => $args{filter}) : ()),
 			}, $d->begin(0));
 	},
@@ -521,8 +548,9 @@ sub announce {
 		#say 'call returned: ', Dumper(\@_);
 		my ($d, $e, $r) = @_;
 		if ($e) {
-			$self->log->debug("announce got error $e");
-			$err = $e;
+			$self->log->error("announce got error: $e->{message}");
+			$err = $e->{message};
+			return;
 		}
 		my ($res, $msg) = @$r;
 		$self->log->debug("announce got res: $res msg: $msg");
@@ -531,12 +559,11 @@ sub announce {
 			mode => $mode,
 			undocb => $undocb,
 			addenv => $args{addenv} // 0,
-			slots => $slots } if $res;
+		} if $res;
 		$err = $msg unless $res;
 	})->catch(sub {
-		my $d;
-		($d, $err) = @_;
-		$self->log->debug("something went wrong with announce: $err");
+		($err) = @_;
+		$self->log->error("something went wrong with announce: $err");
 	})->wait();
 
 	return $err;
@@ -601,6 +628,9 @@ sub rpc_task_ready {
 		} else {
 			die "unkown mode $action->{mode}";
 		}
+	})->catch(sub {
+		my ($err) = @_;
+		$self->log->error("something went wrong with rpc_task_ready: $err");
 	});
 }
 
@@ -906,6 +936,13 @@ $client->close()
 Closes the connection to the JobCenter API and tries to de-allocate
 everything.  Trying to use the client afterwards will produce errors.
 
+=head2 create_slotgroup
+
+$client->create_slotgroup($name, $slots)
+
+A 'slotgroup' is a way of telling the JobCenter API how many taskss the
+worker can do at once.  The number of slots should be a positive integer.
+
 =head2 announce
 
 Announces the capability to do an action to the Api.  The provided callback
@@ -964,10 +1001,14 @@ some Mojo-callbacks.
 
 (optional, default false)
 
+=item - slotgroup: the slotgroup to use for accounting of parrallel tasks
+
+(optional, conflicts with 'slots')
+
 =item - slots: the amount of tasks the worker is able to process in parallel
 for this action.
 
-(optional, default 1)
+(optional, default 1, conflicts with 'slotgroup')
 
 =item - undocb: a callback that gets called when the original callback
 returns an error object or throws an error.  Called with the same arguments
