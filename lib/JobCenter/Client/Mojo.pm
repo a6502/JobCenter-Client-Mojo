@@ -99,7 +99,7 @@ sub connect {
 	$self->{actions} = {};
 
 	$self->on(disconnect => sub {
-		#my ($self, $code) = @_;
+		my ($self, $code) = @_;
 		#$self->{_exit} = $code;
 		$self->ioloop->stop;
 	});
