@@ -94,13 +94,13 @@ sub new {
 sub connect {
 	my $self = shift;
 
-	delete $self->{_exit};
+	delete $self->ioloop->{__exit__};
 	delete $self->{auth};
 	$self->{actions} = {};
 
 	$self->on(disconnect => sub {
-		my ($self, $code) = @_;
-		$self->{_exit} = $code;
+		#my ($self, $code) = @_;
+		#$self->{_exit} = $code;
 		$self->ioloop->stop;
 	});
 
@@ -177,7 +177,7 @@ sub connect {
 
 sub is_connected {
 	my $self = shift;
-	return $self->{auth} && !$self->{_exit};
+	return $self->{auth} && !$self->ioloop->{__exit__};
 }
 
 sub rpc_greetings {
@@ -466,28 +466,28 @@ sub work {
 		return if ($self->lastping // 0) > time - $pt;
 		$self->log->error('ping timeout');
 		$ioloop->remove($self->clientid);
-		$self->{_exit} = WORK_PING_TIMEOUT; # todo: doc
 		$ioloop->remove($tmr);
+		$ioloop->{__exit__} = WORK_PING_TIMEOUT; # todo: doc
 		$ioloop->stop;
 	}) if $pt > 0;
 	$self->on(disconnect => sub {
 		my ($self, $code) = @_;
-		$self->{_exit} = $code;
+		$self->ioloop->{__exit__} = $code;
 		$self->ioloop->stop;
 	});
 
-	$self->{_exit} = WORK_OK;
+	$self->{__exit__} = WORK_OK;
 	$self->log->debug('JobCenter::Client::Mojo starting work');
 	$self->ioloop->start unless Mojo::IOLoop->is_running;
 	$self->log->debug('JobCenter::Client::Mojo done?');
 	$self->ioloop->remove($tmr) if $tmr;
 
-	return $self->{_exit};
+	return $self->ioloop->{__exit__};
 }
 
 sub stop {
 	my ($self, $exit) = @_;
-	$self->{_exit} = $exit;
+	$self->ioloop->{__exit__} = $exit;
 	$self->ioloop->stop;
 }
 
@@ -1011,8 +1011,9 @@ for this action.
 (optional, default 1, conflicts with 'slotgroup')
 
 =item - undocb: a callback that gets called when the original callback
-returns an error object or throws an error.  Called with the same arguments
-as the original callback.
+returns an error object or throws an error.
+
+Called with the same arguments as the original callback.
 
 (optional, only valid for mode 'subproc')
 
