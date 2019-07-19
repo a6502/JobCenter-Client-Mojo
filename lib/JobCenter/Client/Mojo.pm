@@ -476,7 +476,7 @@ sub work {
 		$self->ioloop->stop;
 	});
 
-	$self->{__exit__} = WORK_OK;
+	$self->ioloop->{__exit__} = WORK_OK;
 	$self->log->debug('JobCenter::Client::Mojo starting work');
 	$self->ioloop->start unless Mojo::IOLoop->is_running;
 	$self->log->debug('JobCenter::Client::Mojo done?');
