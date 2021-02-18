@@ -14,7 +14,6 @@ sub steps {
 	croak "no callbacks" unless ref $cbs eq 'ARRAY';
 	# todo: check that array elements are coderefs
 	$self->_remaining($cbs);
-	say "errcb $errcb";
 	$self->_errcb($errcb) if ref $errcb eq 'CODE';
 	
 	$self->ioloop->next_tick(sub { $self->_next(@args) });
@@ -37,9 +36,9 @@ sub _next {
 	}
 }
 
-sub DESTROY {
-	say STDERR "destroying $_[0]";
-}
+#sub DESTROY {
+#	say STDERR "destroying $_[0]";
+#}
 
 1;
 
