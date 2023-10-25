@@ -499,7 +499,8 @@ sub get_job_status_nb {
 		#$self->log->debug("get_job_satus_nb got job_id: $res msg: $msg");
 		if ($e) {
 			$self->log->error("get_job_status got error $e->{message} ($e->{code})");
-			$statuscb->(undef, $e->{message});
+			$e = $self->{jsonobject}->encode($e) if $self->{json};
+			$statuscb->(undef, $e);
 			return;
 		}
 		my ($job_id2, $outargs) = @$r;
