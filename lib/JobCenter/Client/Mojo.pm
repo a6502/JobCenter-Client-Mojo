@@ -387,7 +387,7 @@ sub check_if_lock_exists {
 	croak('no locktype?') unless $locktype;
 	croak('no lockvalue?') unless $lockvalue;
 
-	my ($done, $err, $found);
+	my ($done, $found);
 	JobCenter::Client::Mojo::Steps->new(ioloop => $self->ioloop)->steps([
 	sub {
 		my $steps = shift;
