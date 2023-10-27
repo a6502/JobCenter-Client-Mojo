@@ -312,8 +312,8 @@ sub call_nb {
 		my ($steps, $e, $r) = @_;
 		my ($job_id, $msg);
 		if ($e) {
-			$self->log->error("create_job returned error: $e->{message} ($e->{code}");
-			$msg = "$e->{message} ($e->{code}"
+			$self->log->error("create_job returned error: $e->{message} ($e->{code})");
+			$msg = "$e->{message} ($e->{code})"
 		} else {
 			($job_id, $msg) = @$r; # fixme: check for arrayref?
 			if ($msg) {
@@ -404,7 +404,6 @@ sub check_if_lock_exists {
 		$done++; # received something so done waiting
 		if ($e) {
 			$self->log->error("find_jobs got error $e->{message} ($e->{code})");
-			$err = $e->{message};
 			return;
 		}
 		$found = $r;
