@@ -312,8 +312,8 @@ sub call_nb {
 		my ($steps, $e, $r) = @_;
 		my ($job_id, $msg);
 		if ($e) {
-			$self->log->error("create_job returned error: $e->{message} ($e->{code}");
-			$msg = "$e->{message} ($e->{code}"
+			$self->log->error("create_job returned error: $e->{message} ($e->{code})");
+			$msg = "$e->{message} ($e->{code})"
 		} else {
 			($job_id, $msg) = @$r; # fixme: check for arrayref?
 			if ($msg) {
@@ -387,7 +387,7 @@ sub check_if_lock_exists {
 	croak('no locktype?') unless $locktype;
 	croak('no lockvalue?') unless $lockvalue;
 
-	my ($done, $err, $found);
+	my ($done, $found);
 	JobCenter::Client::Mojo::Steps->new(ioloop => $self->ioloop)->steps([
 	sub {
 		my $steps = shift;
@@ -404,7 +404,6 @@ sub check_if_lock_exists {
 		$done++; # received something so done waiting
 		if ($e) {
 			$self->log->error("find_jobs got error $e->{message} ($e->{code})");
-			$err = $e->{message};
 			return;
 		}
 		$found = $r;
@@ -499,7 +498,9 @@ sub get_job_status_nb {
 		#$self->log->debug("get_job_satus_nb got job_id: $res msg: $msg");
 		if ($e) {
 			$self->log->error("get_job_status got error $e->{message} ($e->{code})");
-			$statuscb->(undef, $e->{message});
+			$e = { error => "$e->{message} ($e->{code})" };
+			$e = $self->{jsonobject}->encode($e) if $self->{json};
+			$statuscb->(undef, $e);
 			return;
 		}
 		my ($job_id2, $outargs) = @$r;
