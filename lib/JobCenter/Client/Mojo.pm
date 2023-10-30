@@ -1049,7 +1049,7 @@ this callback will be called on completion of the job.
 
 =head2 check_if_lock_exists
 
-$found = $client->find_jobs($locktype, $lockvalue);
+$found = $client->check_if_lock_exists($locktype, $lockvalue);
 
 Checks if a lock with the given locktype and lockvalue exists. (I.e. a job
 is currently running that holds that lock.
