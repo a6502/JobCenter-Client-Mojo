@@ -186,6 +186,7 @@ sub connect_nb {
 			# Mojo::Util::_global_destruction() won't work
 			return unless $conn;
 			$conn->close;
+			$self->{auth} = '' if $self;
 			$log->info('connection to API closed');
 			$self->emit(disconnect => WORK_CONNECTION_CLOSED); # todo doc
 		});
