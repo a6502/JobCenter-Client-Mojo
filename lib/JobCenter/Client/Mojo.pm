@@ -1292,6 +1292,20 @@ callback mode the environment will be inserted before the result callback.
 
 =back
 
+=head2 withdraw
+
+Withdraws the capability to do an action to the Api. 
+
+Valid arguments are:
+
+=over 4
+
+=item - actionname: name of the action
+
+(required)
+
+=back
+
 =head2 work
 
 Starts the L<Mojo::IOLoop>.  Returns a non-zero value when the IOLoop was
